@@ -1,22 +1,35 @@
 import React, { useState, useEffect } from 'react';
-import { LogOut, Plus, Trash2, Tag, Globe, Package } from 'lucide-react';
+import {
+  LogOut,
+  Plus,
+  Trash2,
+  Tag,
+  Globe,
+  Package,
+  ClipboardList,
+  Upload,
+  Layers,
+} from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { useStore } from '../context/StoreContext';
 
 export default function StaffDashboard() {
-  const { products, settings, refreshStore } = useStore();
+  const { products, categories, brands, settings, refreshStore } = useStore();
   const [session, setSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('inventory'); // 'inventory' | 'taxonomy' | 'orders' | 'seo'
 
   // Login form state
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
 
-  // New product form
+  // New product form + file upload
   const [newProduct, setNewProduct] = useState({
     name: '',
-    category: 'sneakers',
+    brand: '',
+    category: 'footwear',
+    subcategory: 'Sneakers',
     price: '',
     compare_at_price: '',
     sizesText: 'UK 7, UK 8, UK 9, UK 10',
@@ -24,6 +37,15 @@ export default function StaffDashboard() {
     is_special: false,
     in_stock: true,
   });
+  const [uploadingImage, setUploadingImage] = useState(false);
+
+  // Taxonomy forms (Categories & Brands)
+  const [newCategory, setNewCategory] = useState({ department: 'clothes', name: '' });
+  const [newBrandName, setNewBrandName] = useState('');
+
+  // Orders list
+  const [orders, setOrders] = useState([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
 
   // Promo form & list
   const [promos, setPromos] = useState([]);
@@ -68,8 +90,21 @@ export default function StaffDashboard() {
     if (data) setPromos(data);
   };
 
+  const fetchOrders = async () => {
+    setLoadingOrders(true);
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (!error && data) setOrders(data);
+    setLoadingOrders(false);
+  };
+
   useEffect(() => {
-    if (session) fetchAllPromos();
+    if (session) {
+      fetchAllPromos();
+      fetchOrders();
+    }
   }, [session]);
 
   const handleLogin = async (e) => {
@@ -83,8 +118,54 @@ export default function StaffDashboard() {
     await supabase.auth.signOut();
   };
 
+  const handleDepartmentChange = (dept) => {
+    const firstSub = categories.find((c) => c.department === dept)?.name || '';
+    const defaultSizes =
+      dept === 'footwear'
+        ? 'UK 7, UK 8, UK 9, UK 10'
+        : dept === 'clothes'
+        ? 'S, M, L, XL'
+        : 'One Size';
+
+    setNewProduct((prev) => ({
+      ...prev,
+      category: dept,
+      subcategory: firstSub,
+      sizesText: defaultSizes,
+    }));
+  };
+
+  const handleImageFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingImage(true);
+    try {
+      const ext = file.name.split('.').pop();
+      const filePath = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('product-images')
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data } = supabase.storage.from('product-images').getPublicUrl(filePath);
+      setNewProduct((prev) => ({ ...prev, image_url: data.publicUrl }));
+    } catch (err) {
+      alert(`Image upload failed: ${err.message}`);
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
   const handleAddProduct = async (e) => {
     e.preventDefault();
+    if (!newProduct.image_url) {
+      alert('Please upload an image file or paste an image URL.');
+      return;
+    }
+
     const sizes = newProduct.sizesText
       .split(',')
       .map((s) => s.trim())
@@ -93,7 +174,9 @@ export default function StaffDashboard() {
     const { error } = await supabase.from('products').insert([
       {
         name: newProduct.name,
+        brand: newProduct.brand || brands[0]?.name || 'Trendify Originals',
         category: newProduct.category,
+        subcategory: newProduct.subcategory,
         price: Number(newProduct.price),
         compare_at_price: newProduct.compare_at_price ? Number(newProduct.compare_at_price) : null,
         sizes,
@@ -108,16 +191,14 @@ export default function StaffDashboard() {
       return;
     }
 
-    setNewProduct({
+    setNewProduct((prev) => ({
+      ...prev,
       name: '',
-      category: 'sneakers',
       price: '',
       compare_at_price: '',
-      sizesText: newProduct.category === 'sneakers' ? 'UK 7, UK 8, UK 9, UK 10' : 'S, M, L, XL',
       image_url: '',
       is_special: false,
-      in_stock: true,
-    });
+    }));
     refreshStore();
   };
 
@@ -145,6 +226,45 @@ export default function StaffDashboard() {
     else refreshStore();
   };
 
+  const handleAddCategory = async (e) => {
+    e.preventDefault();
+    if (!newCategory.name.trim()) return;
+    const { error } = await supabase.from('categories').insert([
+      {
+        department: newCategory.department,
+        name: newCategory.name.trim(),
+      },
+    ]);
+    if (error) alert(error.message);
+    else {
+      setNewCategory((prev) => ({ ...prev, name: '' }));
+      refreshStore();
+    }
+  };
+
+  const handleDeleteCategory = async (id) => {
+    const { error } = await supabase.from('categories').delete().eq('id', id);
+    if (error) alert(error.message);
+    else refreshStore();
+  };
+
+  const handleAddBrand = async (e) => {
+    e.preventDefault();
+    if (!newBrandName.trim()) return;
+    const { error } = await supabase.from('brands').insert([{ name: newBrandName.trim() }]);
+    if (error) alert(error.message);
+    else {
+      setNewBrandName('');
+      refreshStore();
+    }
+  };
+
+  const handleDeleteBrand = async (id) => {
+    const { error } = await supabase.from('brands').delete().eq('id', id);
+    if (error) alert(error.message);
+    else refreshStore();
+  };
+
   const handleCreatePromo = async (e) => {
     e.preventDefault();
     const { error } = await supabase.from('promos').insert([
@@ -163,12 +283,18 @@ export default function StaffDashboard() {
     refreshStore();
   };
 
+  const handleOrderStatusChange = async (orderId, nextStatus) => {
+    const { error } = await supabase
+      .from('orders')
+      .update({ status: nextStatus })
+      .eq('id', orderId);
+    if (error) alert(error.message);
+    else fetchOrders();
+  };
+
   const handleSaveSeo = async (e) => {
     e.preventDefault();
-    const { error } = await supabase
-      .from('store_settings')
-      .update(seoForm)
-      .eq('id', 1);
+    const { error } = await supabase.from('store_settings').update(seoForm).eq('id', 1);
     if (error) alert(error.message);
     else {
       alert('SEO & WhatsApp settings saved.');
@@ -177,7 +303,11 @@ export default function StaffDashboard() {
   };
 
   if (authLoading) {
-    return <div className="mx-auto max-w-md py-16 text-center text-sm font-bold uppercase">Checking session...</div>;
+    return (
+      <div className="mx-auto max-w-md py-16 text-center text-sm font-bold uppercase">
+        Checking staff session...
+      </div>
+    );
   }
 
   if (!session) {
@@ -189,7 +319,8 @@ export default function StaffDashboard() {
           </p>
           <h1 className="mt-1 text-2xl font-black uppercase">Staff Portal Login</h1>
           <p className="mt-1 text-xs text-neutral-600">
-            Sign in with your Supabase staff credentials to manage inventory, prices, specials, and SEO.
+            Sign in with your Supabase staff account to manage inventory, categories, brands,
+            orders, and SEO.
           </p>
 
           <form onSubmit={handleLogin} className="mt-5 space-y-3">
@@ -222,12 +353,14 @@ export default function StaffDashboard() {
     );
   }
 
+  const availableSubcategories = categories.filter((c) => c.department === newProduct.category);
+
   return (
-    <main className="mx-auto max-w-7xl space-y-10 px-4 py-8">
+    <main className="mx-auto max-w-7xl space-y-8 px-4 py-8">
       <div className="flex flex-wrap items-center justify-between gap-4 border-b-2 border-black pb-4">
         <div>
           <p className="text-xs font-bold uppercase tracking-widest text-neutral-500">
-            Signed in as {session.user.email}
+            Staff Session: {session.user.email}
           </p>
           <h1 className="text-2xl font-black uppercase">Trendify Staff Dashboard</h1>
         </div>
@@ -240,209 +373,504 @@ export default function StaffDashboard() {
         </button>
       </div>
 
-      {/* 1. Inventory & Pricing */}
-      <section className="border border-black p-6">
-        <h2 className="flex items-center gap-2 text-lg font-black uppercase">
-          <Package className="h-5 w-5" /> Add Inventory &amp; Update Prices
-        </h2>
+      {/* Navigation Tabs */}
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => setActiveTab('inventory')}
+          className={`inline-flex items-center gap-1.5 border border-black px-4 py-2 text-xs font-bold uppercase ${
+            activeTab === 'inventory' ? 'bg-black text-white' : 'bg-white text-black'
+          }`}
+        >
+          <Package className="h-3.5 w-3.5" /> Inventory &amp; Promos
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('taxonomy')}
+          className={`inline-flex items-center gap-1.5 border border-black px-4 py-2 text-xs font-bold uppercase ${
+            activeTab === 'taxonomy' ? 'bg-black text-white' : 'bg-white text-black'
+          }`}
+        >
+          <Layers className="h-3.5 w-3.5" /> Categories &amp; Brands
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('orders');
+            fetchOrders();
+          }}
+          className={`inline-flex items-center gap-1.5 border border-black px-4 py-2 text-xs font-bold uppercase ${
+            activeTab === 'orders' ? 'bg-black text-white' : 'bg-white text-black'
+          }`}
+        >
+          <ClipboardList className="h-3.5 w-3.5" /> Orders ({orders.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('seo')}
+          className={`inline-flex items-center gap-1.5 border border-black px-4 py-2 text-xs font-bold uppercase ${
+            activeTab === 'seo' ? 'bg-black text-white' : 'bg-white text-black'
+          }`}
+        >
+          <Globe className="h-3.5 w-3.5" /> SEO &amp; WhatsApp
+        </button>
+      </div>
 
-        <form onSubmit={handleAddProduct} className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <input
-            required
-            placeholder="Item Name (e.g. Noir Runner)"
-            value={newProduct.name}
-            onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
-            className="border border-black p-2 text-sm outline-none"
-          />
-          <select
-            value={newProduct.category}
-            onChange={(e) => setNewProduct({ ...newProduct, category: e.target.value })}
-            className="border border-black bg-white p-2 text-sm outline-none"
-          >
-            <option value="sneakers">Sneakers</option>
-            <option value="clothes">Clothes</option>
-          </select>
-          <input
-            required
-            type="number"
-            step="0.01"
-            placeholder="Price (ZAR)"
-            value={newProduct.price}
-            onChange={(e) => setNewProduct({ ...newProduct, price: e.target.value })}
-            className="border border-black p-2 text-sm outline-none"
-          />
-          <input
-            type="number"
-            step="0.01"
-            placeholder="Old Price / Compare At (Optional)"
-            value={newProduct.compare_at_price}
-            onChange={(e) => setNewProduct({ ...newProduct, compare_at_price: e.target.value })}
-            className="border border-black p-2 text-sm outline-none"
-          />
-          <input
-            required
-            placeholder="Sizes (e.g. UK 7, UK 8 or S, M, L)"
-            value={newProduct.sizesText}
-            onChange={(e) => setNewProduct({ ...newProduct, sizesText: e.target.value })}
-            className="border border-black p-2 text-sm outline-none"
-          />
-          <input
-            required
-            placeholder="Image URL (https://...)"
-            value={newProduct.image_url}
-            onChange={(e) => setNewProduct({ ...newProduct, image_url: e.target.value })}
-            className="border border-black p-2 text-sm outline-none sm:col-span-2"
-          />
-          <label className="flex items-center gap-2 border border-black px-3 py-2 text-xs font-bold uppercase">
-            <input
-              type="checkbox"
-              checked={newProduct.is_special}
-              onChange={(e) => setNewProduct({ ...newProduct, is_special: e.target.checked })}
-              className="accent-black"
-            />
-            Mark as Special
-          </label>
-          <button
-            type="submit"
-            className="inline-flex items-center justify-center gap-1.5 bg-black py-2.5 text-xs font-bold uppercase tracking-wider text-white hover:bg-neutral-800 lg:col-span-4"
-          >
-            <Plus className="h-4 w-4" /> Add Product to Store
-          </button>
-        </form>
+      {/* TAB 1: INVENTORY & PROMOS */}
+      {activeTab === 'inventory' && (
+        <div className="space-y-8">
+          <section className="border border-black p-6">
+            <h2 className="flex items-center gap-2 text-lg font-black uppercase">
+              <Plus className="h-5 w-5" /> Add Product (Footwear, Clothes, or Accessories)
+            </h2>
 
-        {/* Existing Products List */}
-        <div className="mt-6 divide-y divide-neutral-200 border-t border-black">
-          {products.map((item) => (
-            <div key={item.id} className="flex flex-wrap items-center justify-between gap-4 py-3">
-              <div>
-                <p className="text-sm font-black uppercase">{item.name}</p>
-                <p className="text-xs text-neutral-500">
-                  {item.category} &bull; Sizes: {(item.sizes || []).join(', ')}
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-bold">R</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  defaultValue={item.price}
-                  onBlur={(e) => handleUpdatePrice(item.id, e.target.value)}
-                  className="w-24 border border-black px-2 py-1 text-xs font-bold"
-                  aria-label={`Price for ${item.name}`}
-                />
-                <button
-                  type="button"
-                  onClick={() => handleToggleSpecial(item)}
-                  className={`border border-black px-2.5 py-1 text-xs font-bold uppercase ${
-                    item.is_special ? 'bg-black text-white' : 'bg-white text-black'
-                  }`}
-                >
-                  {item.is_special ? 'Special: ON' : 'Special: OFF'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDeleteProduct(item.id)}
-                  className="border border-black p-1.5 hover:bg-black hover:text-white"
-                  aria-label={`Delete ${item.name}`}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* 2. Specials & Promo Codes */}
-      <section className="border border-black p-6">
-        <h2 className="flex items-center gap-2 text-lg font-black uppercase">
-          <Tag className="h-5 w-5" /> Create Promo / Special Code
-        </h2>
-        <form onSubmit={handleCreatePromo} className="mt-4 flex flex-wrap gap-3">
-          <input
-            required
-            placeholder="Code (e.g. SAVE20)"
-            value={newPromo.code}
-            onChange={(e) => setNewPromo({ ...newPromo, code: e.target.value })}
-            className="border border-black p-2 text-sm uppercase outline-none"
-          />
-          <input
-            required
-            type="number"
-            min="1"
-            max="90"
-            placeholder="Discount %"
-            value={newPromo.discount_percent}
-            onChange={(e) => setNewPromo({ ...newPromo, discount_percent: e.target.value })}
-            className="w-32 border border-black p-2 text-sm outline-none"
-          />
-          <button
-            type="submit"
-            className="bg-black px-5 py-2 text-xs font-bold uppercase tracking-wider text-white hover:bg-neutral-800"
-          >
-            Create Promo
-          </button>
-        </form>
-
-        <div className="mt-4 flex flex-wrap gap-2">
-          {promos.map((p) => (
-            <span
-              key={p.id}
-              className="border border-black px-3 py-1 text-xs font-bold uppercase"
+            <form
+              onSubmit={handleAddProduct}
+              className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"
             >
-              {p.code} — {p.discount_percent}% OFF
-            </span>
-          ))}
-        </div>
-      </section>
+              <input
+                required
+                placeholder="Item Name (e.g. Air Force 1 Triple Black)"
+                value={newProduct.name}
+                onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
+                className="border border-black p-2 text-sm outline-none"
+              />
 
-      {/* 3. SEO & WhatsApp Channel Settings */}
-      <section className="border border-black p-6">
-        <h2 className="flex items-center gap-2 text-lg font-black uppercase">
-          <Globe className="h-5 w-5" /> SEO &amp; WhatsApp Settings
-        </h2>
-        <form onSubmit={handleSaveSeo} className="mt-4 space-y-3">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <input
-              placeholder="WhatsApp Order Number (e.g. 27820000000)"
-              value={seoForm.whatsapp_number}
-              onChange={(e) => setSeoForm({ ...seoForm, whatsapp_number: e.target.value })}
-              className="border border-black p-2 text-sm outline-none"
-            />
-            <input
-              placeholder="WhatsApp Channel URL"
-              value={seoForm.whatsapp_channel_url}
-              onChange={(e) => setSeoForm({ ...seoForm, whatsapp_channel_url: e.target.value })}
-              className="border border-black p-2 text-sm outline-none"
-            />
+              {/* Brand Selector */}
+              <select
+                value={newProduct.brand}
+                onChange={(e) => setNewProduct({ ...newProduct, brand: e.target.value })}
+                className="border border-black bg-white p-2 text-sm outline-none"
+              >
+                <option value="">Select Brand...</option>
+                {brands.map((b) => (
+                  <option key={b.id} value={b.name}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+
+              {/* Main Department Selector */}
+              <select
+                value={newProduct.category}
+                onChange={(e) => handleDepartmentChange(e.target.value)}
+                className="border border-black bg-white p-2 text-sm outline-none"
+              >
+                <option value="footwear">Footwear</option>
+                <option value="clothes">Clothes</option>
+                <option value="accessories">Accessories</option>
+              </select>
+
+              {/* Subcategory Selector */}
+              <select
+                value={newProduct.subcategory}
+                onChange={(e) => setNewProduct({ ...newProduct, subcategory: e.target.value })}
+                className="border border-black bg-white p-2 text-sm outline-none"
+              >
+                <option value="">Select Subcategory...</option>
+                {availableSubcategories.map((sub) => (
+                  <option key={sub.id} value={sub.name}>
+                    {sub.name}
+                  </option>
+                ))}
+              </select>
+
+              <input
+                required
+                type="number"
+                step="0.01"
+                placeholder="Price (ZAR)"
+                value={newProduct.price}
+                onChange={(e) => setNewProduct({ ...newProduct, price: e.target.value })}
+                className="border border-black p-2 text-sm outline-none"
+              />
+              <input
+                type="number"
+                step="0.01"
+                placeholder="Old Price / Compare At (Optional)"
+                value={newProduct.compare_at_price}
+                onChange={(e) => setNewProduct({ ...newProduct, compare_at_price: e.target.value })}
+                className="border border-black p-2 text-sm outline-none"
+              />
+              <input
+                required
+                placeholder="Sizes (e.g. UK 7, UK 8 or S, M, L or One Size)"
+                value={newProduct.sizesText}
+                onChange={(e) => setNewProduct({ ...newProduct, sizesText: e.target.value })}
+                className="border border-black p-2 text-sm outline-none sm:col-span-2"
+              />
+
+              <label className="flex cursor-pointer items-center justify-center gap-2 border border-black bg-neutral-50 px-3 py-2 text-xs font-bold uppercase hover:bg-neutral-100">
+                <Upload className="h-4 w-4" />
+                <span>{uploadingImage ? 'Uploading...' : 'Upload Photo File'}</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageFileUpload}
+                  className="hidden"
+                />
+              </label>
+
+              <input
+                placeholder="Or paste Image URL (auto-filled on upload)"
+                value={newProduct.image_url}
+                onChange={(e) => setNewProduct({ ...newProduct, image_url: e.target.value })}
+                className="border border-black p-2 text-sm outline-none sm:col-span-2"
+              />
+
+              <label className="flex items-center gap-2 border border-black px-3 py-2 text-xs font-bold uppercase">
+                <input
+                  type="checkbox"
+                  checked={newProduct.is_special}
+                  onChange={(e) => setNewProduct({ ...newProduct, is_special: e.target.checked })}
+                  className="accent-black"
+                />
+                Mark as Special
+              </label>
+
+              <button
+                type="submit"
+                disabled={uploadingImage}
+                className="inline-flex items-center justify-center gap-1.5 bg-black py-2.5 text-xs font-bold uppercase tracking-wider text-white hover:bg-neutral-800 disabled:opacity-50 lg:col-span-4"
+              >
+                <Plus className="h-4 w-4" /> Save Product to Store
+              </button>
+            </form>
+
+            {/* Existing Products */}
+            <div className="mt-6 divide-y divide-neutral-200 border-t border-black">
+              {products.map((item) => (
+                <div key={item.id} className="flex flex-wrap items-center justify-between gap-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <img
+                      src={item.image_url}
+                      alt={item.name}
+                      className="h-12 w-12 border border-black object-cover grayscale"
+                    />
+                    <div>
+                      <p className="text-sm font-black uppercase">{item.name}</p>
+                      <p className="text-xs text-neutral-500">
+                        {item.brand || 'No Brand'} &bull; {item.category} /{' '}
+                        {item.subcategory || 'General'} &bull; Sizes: {(item.sizes || []).join(', ')}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-bold">R</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      defaultValue={item.price}
+                      onBlur={(e) => handleUpdatePrice(item.id, e.target.value)}
+                      className="w-24 border border-black px-2 py-1 text-xs font-bold"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleToggleSpecial(item)}
+                      className={`border border-black px-2.5 py-1 text-xs font-bold uppercase ${
+                        item.is_special ? 'bg-black text-white' : 'bg-white text-black'
+                      }`}
+                    >
+                      {item.is_special ? 'Special: ON' : 'Special: OFF'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteProduct(item.id)}
+                      className="border border-black p-1.5 hover:bg-black hover:text-white"
+                      aria-label={`Delete ${item.name}`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Promo Codes */}
+          <section className="border border-black p-6">
+            <h2 className="flex items-center gap-2 text-lg font-black uppercase">
+              <Tag className="h-5 w-5" /> Create Promo / Special Code
+            </h2>
+            <form onSubmit={handleCreatePromo} className="mt-4 flex flex-wrap gap-3">
+              <input
+                required
+                placeholder="Code (e.g. TREND20)"
+                value={newPromo.code}
+                onChange={(e) => setNewPromo({ ...newPromo, code: e.target.value })}
+                className="border border-black p-2 text-sm uppercase outline-none"
+              />
+              <input
+                required
+                type="number"
+                min="1"
+                max="90"
+                placeholder="Discount %"
+                value={newPromo.discount_percent}
+                onChange={(e) => setNewPromo({ ...newPromo, discount_percent: e.target.value })}
+                className="w-32 border border-black p-2 text-sm outline-none"
+              />
+              <button
+                type="submit"
+                className="bg-black px-5 py-2 text-xs font-bold uppercase tracking-wider text-white hover:bg-neutral-800"
+              >
+                Create Promo
+              </button>
+            </form>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              {promos.map((p) => (
+                <span key={p.id} className="border border-black px-3 py-1 text-xs font-bold uppercase">
+                  {p.code} — {p.discount_percent}% OFF
+                </span>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {/* TAB 2: CATEGORIES & BRANDS MANAGER */}
+      {activeTab === 'taxonomy' && (
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
+          {/* Subcategories Manager */}
+          <section className="border border-black p-6">
+            <h2 className="text-lg font-black uppercase">Manage Subcategories</h2>
+            <p className="mt-1 text-xs text-neutral-600">
+              Add or remove subcategories under Footwear, Clothes, or Accessories.
+            </p>
+
+            <form onSubmit={handleAddCategory} className="mt-4 flex flex-wrap gap-2">
+              <select
+                value={newCategory.department}
+                onChange={(e) => setNewCategory({ ...newCategory, department: e.target.value })}
+                className="border border-black bg-white p-2 text-xs font-bold uppercase outline-none"
+              >
+                <option value="footwear">Footwear</option>
+                <option value="clothes">Clothes</option>
+                <option value="accessories">Accessories</option>
+              </select>
+              <input
+                required
+                placeholder="Subcategory Name (e.g. Hoodies, Caps)"
+                value={newCategory.name}
+                onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })}
+                className="flex-1 border border-black p-2 text-sm outline-none"
+              />
+              <button
+                type="submit"
+                className="bg-black px-4 py-2 text-xs font-bold uppercase text-white hover:bg-neutral-800"
+              >
+                Add
+              </button>
+            </form>
+
+            <div className="mt-6 space-y-4">
+              {['footwear', 'clothes', 'accessories'].map((dept) => (
+                <div key={dept} className="border-t border-neutral-200 pt-3">
+                  <p className="mb-2 text-xs font-black uppercase tracking-wider">{dept}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {categories
+                      .filter((c) => c.department === dept)
+                      .map((cat) => (
+                        <span
+                          key={cat.id}
+                          className="inline-flex items-center gap-2 border border-black px-2.5 py-1 text-xs font-bold"
+                        >
+                          {cat.name}
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteCategory(cat.id)}
+                            className="text-neutral-500 hover:text-black"
+                            aria-label={`Delete ${cat.name}`}
+                          >
+                            &times;
+                          </button>
+                        </span>
+                      ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Brands Manager */}
+          <section className="border border-black p-6">
+            <h2 className="text-lg font-black uppercase">Manage Brands</h2>
+            <p className="mt-1 text-xs text-neutral-600">
+              Create brand names that staff can assign to items and customers can search or filter by.
+            </p>
+
+            <form onSubmit={handleAddBrand} className="mt-4 flex gap-2">
+              <input
+                required
+                placeholder="Brand Name (e.g. Nike, Jordan, G-Shock)"
+                value={newBrandName}
+                onChange={(e) => setNewBrandName(e.target.value)}
+                className="flex-1 border border-black p-2 text-sm outline-none"
+              />
+              <button
+                type="submit"
+                className="bg-black px-4 py-2 text-xs font-bold uppercase text-white hover:bg-neutral-800"
+              >
+                Add Brand
+              </button>
+            </form>
+
+            <div className="mt-6 flex flex-wrap gap-2 border-t border-neutral-200 pt-4">
+              {brands.map((b) => (
+                <span
+                  key={b.id}
+                  className="inline-flex items-center gap-2 border border-black px-3 py-1.5 text-xs font-bold uppercase"
+                >
+                  {b.name}
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteBrand(b.id)}
+                    className="text-neutral-500 hover:text-black"
+                    aria-label={`Delete ${b.name}`}
+                  >
+                    &times;
+                  </button>
+                </span>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {/* TAB 3: ORDERS */}
+      {activeTab === 'orders' && (
+        <section className="border border-black p-6">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-black uppercase">Customer Orders</h2>
+            <button
+              type="button"
+              onClick={fetchOrders}
+              className="border border-black px-3 py-1.5 text-xs font-bold uppercase hover:bg-black hover:text-white"
+            >
+              Refresh Orders
+            </button>
           </div>
-          <input
-            placeholder="SEO Meta Title"
-            value={seoForm.seo_title}
-            onChange={(e) => setSeoForm({ ...seoForm, seo_title: e.target.value })}
-            className="w-full border border-black p-2 text-sm outline-none"
-          />
-          <textarea
-            rows={2}
-            placeholder="SEO Meta Description"
-            value={seoForm.seo_description}
-            onChange={(e) => setSeoForm({ ...seoForm, seo_description: e.target.value })}
-            className="w-full border border-black p-2 text-sm outline-none"
-          />
-          <input
-            placeholder="SEO Keywords (comma separated)"
-            value={seoForm.seo_keywords}
-            onChange={(e) => setSeoForm({ ...seoForm, seo_keywords: e.target.value })}
-            className="w-full border border-black p-2 text-sm outline-none"
-          />
-          <button
-            type="submit"
-            className="bg-black px-5 py-2.5 text-xs font-bold uppercase tracking-wider text-white hover:bg-neutral-800"
-          >
-            Save SEO &amp; WhatsApp Settings
-          </button>
-        </form>
-      </section>
+
+          {loadingOrders ? (
+            <p className="mt-4 text-xs font-bold uppercase">Loading orders...</p>
+          ) : orders.length === 0 ? (
+            <p className="mt-4 text-xs text-neutral-500">No orders recorded yet.</p>
+          ) : (
+            <div className="mt-6 space-y-4">
+              {orders.map((ord) => {
+                const addr = ord.delivery_address || {};
+                return (
+                  <div key={ord.id} className="border border-black p-4 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-200 pb-2">
+                      <div>
+                        <span className="font-black uppercase">
+                          Order #{ord.id.slice(0, 8).toUpperCase()}
+                        </span>{' '}
+                        <span className="text-neutral-500">
+                          &bull; {new Date(ord.created_at).toLocaleString()}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="font-black">Total: R{Number(ord.total_amount).toFixed(2)}</span>
+                        <select
+                          value={ord.status || 'transferred_to_whatsapp'}
+                          onChange={(e) => handleOrderStatusChange(ord.id, e.target.value)}
+                          className="border border-black bg-white px-2 py-1 text-xs font-bold uppercase"
+                        >
+                          <option value="transferred_to_whatsapp">Transferred to WhatsApp</option>
+                          <option value="confirmed">Confirmed</option>
+                          <option value="dispatched">Dispatched</option>
+                          <option value="completed">Completed</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div>
+                        <p className="font-bold uppercase">Customer &amp; Address</p>
+                        <p className="mt-0.5 text-neutral-700">
+                          {ord.customer_name} ({ord.customer_phone})
+                        </p>
+                        <p className="text-neutral-700">
+                          {addr.street}, {addr.suburb}, {addr.city}, {addr.province} {addr.postalCode}
+                        </p>
+                        <p className="mt-1 font-bold text-neutral-800">
+                          Delivery: {ord.delivery_method}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="font-bold uppercase">Items</p>
+                        <ul className="mt-0.5 space-y-1 text-neutral-700">
+                          {(ord.items || []).map((it, i) => (
+                            <li key={i}>
+                              {it.brand ? `[${it.brand}] ` : ''}
+                              {it.name} — Size: <strong>{it.selectedSize}</strong> &times; {it.qty}{' '}
+                              (R{(Number(it.price) * it.qty).toFixed(2)})
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* TAB 4: SEO & WHATSAPP */}
+      {activeTab === 'seo' && (
+        <section className="border border-black p-6">
+          <h2 className="flex items-center gap-2 text-lg font-black uppercase">
+            <Globe className="h-5 w-5" /> SEO &amp; WhatsApp Settings
+          </h2>
+          <form onSubmit={handleSaveSeo} className="mt-4 space-y-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <input
+                placeholder="WhatsApp Order Number (e.g. 27820000000)"
+                value={seoForm.whatsapp_number}
+                onChange={(e) => setSeoForm({ ...seoForm, whatsapp_number: e.target.value })}
+                className="border border-black p-2 text-sm outline-none"
+              />
+              <input
+                placeholder="WhatsApp Channel URL"
+                value={seoForm.whatsapp_channel_url}
+                onChange={(e) => setSeoForm({ ...seoForm, whatsapp_channel_url: e.target.value })}
+                className="border border-black p-2 text-sm outline-none"
+              />
+            </div>
+            <input
+              placeholder="SEO Meta Title"
+              value={seoForm.seo_title}
+              onChange={(e) => setSeoForm({ ...seoForm, seo_title: e.target.value })}
+              className="w-full border border-black p-2 text-sm outline-none"
+            />
+            <textarea
+              rows={2}
+              placeholder="SEO Meta Description"
+              value={seoForm.seo_description}
+              onChange={(e) => setSeoForm({ ...seoForm, seo_description: e.target.value })}
+              className="w-full border border-black p-2 text-sm outline-none"
+            />
+            <input
+              placeholder="SEO Keywords (comma separated)"
+              value={seoForm.seo_keywords}
+              onChange={(e) => setSeoForm({ ...seoForm, seo_keywords: e.target.value })}
+              className="w-full border border-black p-2 text-sm outline-none"
+            />
+            <button
+              type="submit"
+              className="bg-black px-5 py-2.5 text-xs font-bold uppercase tracking-wider text-white hover:bg-neutral-800"
+            >
+              Save SEO &amp; WhatsApp Settings
+            </button>
+          </form>
+        </section>
+      )}
     </main>
   );
 }

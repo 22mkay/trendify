@@ -1,22 +1,18 @@
 import React, { useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
-
-const DELIVERY_OPTIONS = [
-  { id: 'pickup', label: 'Store / Collection Point Pickup', fee: 0 },
-  { id: 'pargo', label: 'Pargo Pickup Point (3–5 Days)', fee: 65 },
-  { id: 'standard', label: 'Door-to-Door Courier (2–4 Days)', fee: 110 },
-  { id: 'express', label: 'Express Overnight Courier', fee: 180 },
-];
+import { DELIVERY_OPTIONS } from '../config/deliveryOptions';
 
 export default function CheckoutWizard({
   cart,
   subtotal,
   discount,
   settings,
+  user,
+  onRequireLogin,
   onClose,
   onClearCart,
 }) {
-  const [step, setStep] = useState(1); // 1: Delivery Address | 2: Delivery Options & WhatsApp Transfer
+  const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
 
   const [address, setAddress] = useState({
@@ -29,8 +25,40 @@ export default function CheckoutWizard({
     postalCode: '',
   });
 
-  const [delivery, setDelivery] = useState(DELIVERY_OPTIONS[2]);
+  const [delivery, setDelivery] = useState(DELIVERY_OPTIONS[1] || DELIVERY_OPTIONS[0]);
   const grandTotal = Math.max(0, subtotal - discount) + delivery.fee;
+
+  if (!user) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+        <div className="w-full max-w-md border-2 border-black bg-white p-6 text-black shadow-2xl">
+          <p className="text-xs font-bold uppercase tracking-widest text-neutral-500">
+            Login Required
+          </p>
+          <h2 className="mt-1 text-xl font-black uppercase">Sign In to Place Your Order</h2>
+          <p className="mt-2 text-xs text-neutral-600">
+            Customers must be signed in before entering a delivery address or transferring an order to WhatsApp.
+          </p>
+          <div className="mt-5 flex gap-3">
+            <button
+              type="button"
+              onClick={onRequireLogin}
+              className="flex-1 bg-black py-3 text-xs font-bold uppercase tracking-widest text-white hover:bg-neutral-800"
+            >
+              Sign In / Create Account
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="border border-black px-4 py-3 text-xs font-bold uppercase hover:bg-neutral-100"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const handleAddressSubmit = (e) => {
     e.preventDefault();
@@ -41,10 +69,10 @@ export default function CheckoutWizard({
     const lines = [
       `*NEW TRENDIFY ORDER #${orderId.slice(0, 8).toUpperCase()}*`,
       `------------------------------`,
-      `*Customer:* ${address.fullName}`,
+      `*Customer:* ${address.fullName} (${user.email})`,
       `*Phone:* ${address.phone}`,
       `*Delivery Address:* ${address.street}, ${address.suburb}, ${address.city}, ${address.province}, ${address.postalCode}`,
-      `*Delivery Option:* ${delivery.label} (R${delivery.fee.toFixed(2)})`,
+      `*Delivery Option:* ${delivery.label} (${delivery.fee === 0 ? 'FREE' : `R${delivery.fee.toFixed(2)}`})`,
       `------------------------------`,
       `*Order Items:*`,
       ...cart.map(
@@ -57,7 +85,7 @@ export default function CheckoutWizard({
       ...(discount > 0 ? [`*Promo Discount:* -R${discount.toFixed(2)}`] : []),
       `*Total Payable:* R${grandTotal.toFixed(2)}`,
       ``,
-      `Please confirm stock and share payment details.`,
+      `Please confirm availability and share payment details.`,
     ];
 
     const phone = (settings?.whatsapp_number || '27000000000').replace(/\D/g, '');
@@ -65,6 +93,10 @@ export default function CheckoutWizard({
   };
 
   const handleTransferToWhatsApp = async () => {
+    if (!user) {
+      onRequireLogin();
+      return;
+    }
     setLoading(true);
     try {
       const { data, error } = await supabase
@@ -73,11 +105,12 @@ export default function CheckoutWizard({
           {
             customer_name: address.fullName,
             customer_phone: address.phone,
-            delivery_address: address,
+            delivery_address: { ...address, email: user.email, user_id: user.id },
             delivery_method: delivery.label,
             delivery_fee: delivery.fee,
             items: cart,
             total_amount: grandTotal,
+            status: 'transferred_to_whatsapp',
           },
         ])
         .select()
@@ -102,7 +135,7 @@ export default function CheckoutWizard({
         <div className="mb-6 flex items-center justify-between border-b border-black pb-4">
           <div>
             <p className="text-xs font-bold uppercase tracking-widest text-neutral-500">
-              Step {step} of 2
+              Step {step} of 2 &bull; {user.email}
             </p>
             <h2 className="text-xl font-black uppercase tracking-tight">
               {step === 1 ? 'Delivery Address' : 'Delivery Options & WhatsApp'}
@@ -200,11 +233,7 @@ export default function CheckoutWizard({
             <div className="border border-neutral-300 bg-neutral-50 p-3 text-xs">
               <div className="flex justify-between">
                 <span className="font-bold uppercase">Delivery Address:</span>
-                <button
-                  type="button"
-                  onClick={() => setStep(1)}
-                  className="underline"
-                >
+                <button type="button" onClick={() => setStep(1)} className="underline">
                   Change Address
                 </button>
               </div>

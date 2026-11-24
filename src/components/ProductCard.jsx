@@ -41,9 +41,10 @@ export default function ProductCard({ product }) {
         </div>
 
         <div className="p-4">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">
-            {product.category}
-          </p>
+          <div className="flex items-center justify-between gap-2 text-[10px] font-bold uppercase tracking-widest text-neutral-500">
+            <span>{product.brand || 'Trendify'}</span>
+            <span>{product.subcategory || product.category}</span>
+          </div>
           <h3 className="mt-1 text-base font-black uppercase leading-snug">{product.name}</h3>
 
           <div className="mt-2 flex items-baseline gap-2">
@@ -57,7 +58,7 @@ export default function ProductCard({ product }) {
 
           <div className="mt-4">
             <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-neutral-600">
-              Select Size
+              Select Size / Fit
             </p>
             <div className="flex flex-wrap gap-1.5">
               {(product.sizes || []).map((size) => (

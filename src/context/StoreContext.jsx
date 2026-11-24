@@ -5,18 +5,22 @@ const StoreContext = createContext();
 
 export function StoreProvider({ children }) {
   const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [brands, setBrands] = useState([]);
   const [promos, setPromos] = useState([]);
   const [settings, setSettings] = useState({
     whatsapp_number: '27000000000',
     whatsapp_channel_url: 'https://whatsapp.com/channel/0029VaTrendify',
-    seo_title: 'TRENDIFY | Monochrome Sneakers & Streetwear',
+    seo_title: 'TRENDIFY | Monochrome Footwear, Streetwear & Accessories',
     seo_description:
-      'Shop black and white sneakers and streetwear at Trendify. Pick your size, enter your delivery address, choose delivery, and transfer your order to WhatsApp.',
-    seo_keywords: 'sneakers, streetwear, monochrome fashion, Trendify',
+      'Shop black and white sneakers, slides, clothing, and accessories at Trendify.',
+    seo_keywords: 'sneakers, slides, streetwear, caps, watches, Trendify',
   });
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeCategory, setActiveCategory] = useState('all');
+  const [activeDepartment, setActiveDepartment] = useState('all'); // 'all' | 'footwear' | 'clothes' | 'accessories' | 'specials'
+  const [activeSubcategory, setActiveSubcategory] = useState('all');
+  const [activeBrand, setActiveBrand] = useState('all');
   const [appliedPromo, setAppliedPromo] = useState(null);
 
   const [cart, setCart] = useState(() => {
@@ -48,13 +52,23 @@ export function StoreProvider({ children }) {
       return;
     }
 
-    const [{ data: prodData }, { data: promoData }, { data: settingsData }] = await Promise.all([
+    const [
+      { data: prodData },
+      { data: catData },
+      { data: brandData },
+      { data: promoData },
+      { data: settingsData },
+    ] = await Promise.all([
       supabase.from('products').select('*').order('created_at', { ascending: false }),
+      supabase.from('categories').select('*').order('name', { ascending: true }),
+      supabase.from('brands').select('*').order('name', { ascending: true }),
       supabase.from('promos').select('*').eq('active', true),
       supabase.from('store_settings').select('*').eq('id', 1).single(),
     ]);
 
     if (prodData) setProducts(prodData);
+    if (catData) setCategories(catData);
+    if (brandData) setBrands(brandData);
     if (promoData) setPromos(promoData);
     if (settingsData) setSettings(settingsData);
   };
@@ -63,11 +77,15 @@ export function StoreProvider({ children }) {
     fetchStoreData();
   }, []);
 
-  // Dynamically update document head SEO tags & JSON-LD schema
+  // Reset subcategory when switching main departments
+  const selectDepartment = (dept, sub = 'all') => {
+    setActiveDepartment(dept);
+    setActiveSubcategory(sub);
+  };
+
+  // Dynamic SEO Head Updater
   useEffect(() => {
-    if (settings.seo_title) {
-      document.title = settings.seo_title;
-    }
+    if (settings.seo_title) document.title = settings.seo_title;
 
     const upsertMeta = (name, content) => {
       if (!content) return;
@@ -82,22 +100,6 @@ export function StoreProvider({ children }) {
 
     upsertMeta('description', settings.seo_description);
     upsertMeta('keywords', settings.seo_keywords);
-
-    let scriptTag = document.getElementById('trendify-jsonld');
-    if (!scriptTag) {
-      scriptTag = document.createElement('script');
-      scriptTag.id = 'trendify-jsonld';
-      scriptTag.type = 'application/ld+json';
-      document.head.appendChild(scriptTag);
-    }
-    scriptTag.textContent = JSON.stringify({
-      '@context': 'https://schema.org',
-      '@type': 'Store',
-      name: 'TRENDIFY',
-      description: settings.seo_description,
-      url: window.location.origin,
-      sameAs: [settings.whatsapp_channel_url].filter(Boolean),
-    });
   }, [settings]);
 
   const addToCart = (product, selectedSize) => {
@@ -152,28 +154,35 @@ export function StoreProvider({ children }) {
   const applyPromoCode = (codeInput) => {
     const cleaned = codeInput.trim().toLowerCase();
     const match = promos.find((p) => p.code.toLowerCase() === cleaned && p.active);
-    if (!match) {
-      return { success: false, message: 'Invalid or inactive promo code.' };
-    }
+    if (!match) return { success: false, message: 'Invalid or inactive promo code.' };
     setAppliedPromo(match);
     return { success: true, message: `${match.discount_percent}% off applied (${match.code}).` };
   };
 
+  // Multi-facet Search & Filter (Name, Brand, Department, Subcategory, Sizes)
   const filteredProducts = products.filter((p) => {
-    const q = searchQuery.toLowerCase();
+    const q = searchQuery.toLowerCase().trim();
     const matchesSearch =
+      !q ||
       p.name.toLowerCase().includes(q) ||
-      p.category.toLowerCase().includes(q) ||
+      (p.brand || '').toLowerCase().includes(q) ||
+      (p.category || '').toLowerCase().includes(q) ||
+      (p.subcategory || '').toLowerCase().includes(q) ||
       (p.sizes || []).some((s) => s.toLowerCase().includes(q));
 
-    const matchesCategory =
-      activeCategory === 'all'
+    const matchesDepartment =
+      activeDepartment === 'all'
         ? true
-        : activeCategory === 'specials'
+        : activeDepartment === 'specials'
         ? Boolean(p.is_special)
-        : p.category === activeCategory;
+        : p.category === activeDepartment;
 
-    return matchesSearch && matchesCategory;
+    const matchesSubcategory =
+      activeSubcategory === 'all' ? true : p.subcategory === activeSubcategory;
+
+    const matchesBrand = activeBrand === 'all' ? true : p.brand === activeBrand;
+
+    return matchesSearch && matchesDepartment && matchesSubcategory && matchesBrand;
   });
 
   const subtotal = cart.reduce((sum, item) => sum + Number(item.price) * item.qty, 0);
@@ -183,12 +192,18 @@ export function StoreProvider({ children }) {
     <StoreContext.Provider
       value={{
         products,
+        categories,
+        brands,
         filteredProducts,
         settings,
         searchQuery,
         setSearchQuery,
-        activeCategory,
-        setActiveCategory,
+        activeDepartment,
+        selectDepartment,
+        activeSubcategory,
+        setActiveSubcategory,
+        activeBrand,
+        setActiveBrand,
         cart,
         addToCart,
         updateCartQty,
