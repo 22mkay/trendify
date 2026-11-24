@@ -3,6 +3,14 @@
 @layer base {
   html,
   body {
-    @apply bg-white text-black antialiased selection:bg-black selection:text-white;
+    background-color: #ffffff;
+    color: #000000;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    background-color: #000000;
+    color: #ffffff;
   }
 }
