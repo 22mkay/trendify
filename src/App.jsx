@@ -5,16 +5,21 @@ import Navbar from './components/Navbar';
 import CartDrawer from './components/CartDrawer';
 import CheckoutWizard from './components/CheckoutWizard';
 import CustomerAuthModal from './components/CustomerAuthModal';
+import CustomerOrdersModal from './components/CustomerOrdersModal';
 import Storefront from './pages/Storefront';
 import StaffDashboard from './pages/StaffDashboard';
 
 function TrendifyShell() {
   const { cart, subtotal, discount, settings, clearCart } = useStore();
   const [user, setUser] = useState(null);
-  const [isStaffView, setIsStaffView] = useState(false);
+  const [isStaffView, setIsStaffView] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('staff') === 'true';
+  });
   const [drawerMode, setDrawerMode] = useState(null); // null | 'cart' | 'wishlist'
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [customerAuthOpen, setCustomerAuthOpen] = useState(false);
+  const [customerOrdersOpen, setCustomerOrdersOpen] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -41,44 +46,57 @@ function TrendifyShell() {
   const handleCustomerSignOut = async () => {
     await supabase.auth.signOut();
     setCheckoutOpen(false);
+    setCustomerOrdersOpen(false);
   };
 
   return (
     <div className="min-h-screen bg-white text-black">
       <Navbar
+        user={user}
         isStaffView={isStaffView}
-        onToggleStaff={() => setIsStaffView((prev) => !prev)}
+        onExitStaff={() => setIsStaffView(false)}
         onOpenCart={() => setDrawerMode('cart')}
         onOpenWishlist={() => setDrawerMode('wishlist')}
+        onOpenCustomerAuth={() => setCustomerAuthOpen(true)}
+        onOpenCustomerOrders={() => setCustomerOrdersOpen(true)}
       />
 
       {!isStaffView && (
         <div className="border-b border-neutral-200 bg-neutral-50 px-4 py-2 text-xs">
-          <div className="mx-auto flex max-w-7xl items-center justify-between">
+          <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2">
             {user ? (
               <>
                 <span>
                   Signed in as <strong>{user.email}</strong>
                 </span>
-                <button
-                  type="button"
-                  onClick={handleCustomerSignOut}
-                  className="font-bold uppercase underline"
-                >
-                  Customer Sign Out
-                </button>
+                <div className="flex items-center gap-4">
+                  <button
+                    type="button"
+                    onClick={() => setCustomerOrdersOpen(true)}
+                    className="font-bold uppercase underline"
+                  >
+                    Track My Orders
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCustomerSignOut}
+                    className="font-bold uppercase underline text-neutral-600 hover:text-black"
+                  >
+                    Sign Out
+                  </button>
+                </div>
               </>
             ) : (
               <>
                 <span className="text-neutral-600">
-                  Browse freely — sign in required when placing an order.
+                  Create an account or sign in to place &amp; track your orders.
                 </span>
                 <button
                   type="button"
                   onClick={() => setCustomerAuthOpen(true)}
                   className="font-bold uppercase underline"
                 >
-                  Customer Sign In / Register
+                  Create Account / Sign In
                 </button>
               </>
             )}
@@ -98,7 +116,15 @@ function TrendifyShell() {
       <CustomerAuthModal
         isOpen={customerAuthOpen}
         onClose={() => setCustomerAuthOpen(false)}
-        onAuthenticated={() => setCheckoutOpen(true)}
+        onAuthenticated={() => {
+          if (cart.length > 0) setCheckoutOpen(true);
+        }}
+      />
+
+      <CustomerOrdersModal
+        isOpen={customerOrdersOpen}
+        onClose={() => setCustomerOrdersOpen(false)}
+        user={user}
       />
 
       {checkoutOpen && (
@@ -128,12 +154,14 @@ function TrendifyShell() {
           >
             Official WhatsApp Channel
           </a>
+          {/* Hidden Staff Access Trigger on the copyright symbol */}
           <button
             type="button"
             onClick={() => setIsStaffView((prev) => !prev)}
-            className="font-bold uppercase underline"
+            className="cursor-default text-neutral-400 hover:text-black"
+            aria-label="Portal"
           >
-            {isStaffView ? 'View Storefront' : 'Staff Admin'}
+            &copy; {new Date().getFullYear()} Trendify
           </button>
         </div>
       </footer>

@@ -9,6 +9,9 @@ import {
   ClipboardList,
   Upload,
   Layers,
+  Mail,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { useStore } from '../context/StoreContext';
@@ -16,12 +19,14 @@ import { useStore } from '../context/StoreContext';
 export default function StaffDashboard() {
   const { products, categories, brands, settings, refreshStore } = useStore();
   const [session, setSession] = useState(null);
+  const [isAuthorizedStaff, setIsAuthorizedStaff] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('inventory'); // 'inventory' | 'taxonomy' | 'orders' | 'seo'
 
   // Login form state
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
 
   // New product form + file upload
@@ -39,19 +44,25 @@ export default function StaffDashboard() {
   });
   const [uploadingImage, setUploadingImage] = useState(false);
 
-  // Taxonomy forms (Categories & Brands)
+  // Taxonomy forms
   const [newCategory, setNewCategory] = useState({ department: 'clothes', name: '' });
   const [newBrandName, setNewBrandName] = useState('');
 
-  // Orders list
+  // Orders & Tracking
   const [orders, setOrders] = useState([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
 
-  // Promo form & list
+  // Promos & Email Blast
   const [promos, setPromos] = useState([]);
   const [newPromo, setNewPromo] = useState({ code: '', discount_percent: 10, active: true });
+  const [customerEmails, setCustomerEmails] = useState([]);
+  const [emailBlast, setEmailBlast] = useState({
+    promoCode: '',
+    subject: 'TRENDIFY Exclusive Promo Drop',
+    message: 'Use our exclusive promo code at checkout on Trendify before stock runs out!',
+  });
 
-  // SEO & WhatsApp settings form
+  // SEO & WhatsApp settings
   const [seoForm, setSeoForm] = useState({
     whatsapp_number: settings.whatsapp_number || '',
     whatsapp_channel_url: settings.whatsapp_channel_url || '',
@@ -70,24 +81,53 @@ export default function StaffDashboard() {
     });
   }, [settings]);
 
+  const verifyStaffRole = async (currentSession) => {
+    if (!currentSession?.user?.email) {
+      setIsAuthorizedStaff(false);
+      setAuthLoading(false);
+      return;
+    }
+    const { data } = await supabase
+      .from('staff_users')
+      .select('email')
+      .ilike('email', currentSession.user.email)
+      .maybeSingle();
+
+    setIsAuthorizedStaff(Boolean(data));
+    setAuthLoading(false);
+  };
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
-      setAuthLoading(false);
+      verifyStaffRole(data.session);
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
+      verifyStaffRole(nextSession);
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  const fetchAllPromos = async () => {
-    const { data } = await supabase.from('promos').select('*').order('code');
-    if (data) setPromos(data);
+  const fetchStaffData = async () => {
+    const [{ data: promoData }, { data: profilesData }] = await Promise.all([
+      supabase.from('promos').select('*').order('code'),
+      supabase.from('customer_profiles').select('email').order('created_at', { ascending: false }),
+    ]);
+
+    if (promoData) {
+      setPromos(promoData);
+      if (promoData[0] && !emailBlast.promoCode) {
+        setEmailBlast((prev) => ({ ...prev, promoCode: promoData[0].code }));
+      }
+    }
+    if (profilesData) {
+      setCustomerEmails(profilesData.map((p) => p.email).filter(Boolean));
+    }
   };
 
   const fetchOrders = async () => {
@@ -101,17 +141,30 @@ export default function StaffDashboard() {
   };
 
   useEffect(() => {
-    if (session) {
-      fetchAllPromos();
+    if (session && isAuthorizedStaff) {
+      fetchStaffData();
       fetchOrders();
     }
-  }, [session]);
+  }, [session, isAuthorizedStaff]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoginError('');
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) setLoginError(error.message);
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      setLoginError(error.message);
+      return;
+    }
+    const { data: staffRow } = await supabase
+      .from('staff_users')
+      .select('email')
+      .ilike('email', data.user.email)
+      .maybeSingle();
+
+    if (!staffRow) {
+      await supabase.auth.signOut();
+      setLoginError('Access denied: this account is not listed in staff_users.');
+    }
   };
 
   const handleLogout = async () => {
@@ -230,10 +283,7 @@ export default function StaffDashboard() {
     e.preventDefault();
     if (!newCategory.name.trim()) return;
     const { error } = await supabase.from('categories').insert([
-      {
-        department: newCategory.department,
-        name: newCategory.name.trim(),
-      },
+      { department: newCategory.department, name: newCategory.name.trim() },
     ]);
     if (error) alert(error.message);
     else {
@@ -267,9 +317,10 @@ export default function StaffDashboard() {
 
   const handleCreatePromo = async (e) => {
     e.preventDefault();
+    const createdCode = newPromo.code.trim().toUpperCase();
     const { error } = await supabase.from('promos').insert([
       {
-        code: newPromo.code.trim().toUpperCase(),
+        code: createdCode,
         discount_percent: Number(newPromo.discount_percent),
         active: newPromo.active,
       },
@@ -279,15 +330,44 @@ export default function StaffDashboard() {
       return;
     }
     setNewPromo({ code: '', discount_percent: 10, active: true });
-    fetchAllPromos();
+    setEmailBlast((prev) => ({ ...prev, promoCode: createdCode }));
+    fetchStaffData();
     refreshStore();
   };
 
-  const handleOrderStatusChange = async (orderId, nextStatus) => {
-    const { error } = await supabase
-      .from('orders')
-      .update({ status: nextStatus })
-      .eq('id', orderId);
+  const handleSendPromoEmailBlast = (e) => {
+    e.preventDefault();
+    if (customerEmails.length === 0) {
+      alert('No registered customer account emails found yet.');
+      return;
+    }
+
+    const selectedPromo = promos.find((p) => p.code === emailBlast.promoCode);
+    const promoLine = selectedPromo
+      ? `Promo Code: ${selectedPromo.code} (${selectedPromo.discount_percent}% OFF)`
+      : emailBlast.promoCode
+      ? `Promo Code: ${emailBlast.promoCode}`
+      : '';
+
+    const fullBody = [
+      emailBlast.message,
+      '',
+      promoLine,
+      `Shop now at: ${window.location.origin}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    // Opens staff's default email client with all customer emails in BCC so addresses stay private
+    const mailtoUrl = `mailto:?bcc=${encodeURIComponent(
+      customerEmails.join(',')
+    )}&subject=${encodeURIComponent(emailBlast.subject)}&body=${encodeURIComponent(fullBody)}`;
+
+    window.location.href = mailtoUrl;
+  };
+
+  const handleUpdateOrder = async (orderId, patch) => {
+    const { error } = await supabase.from('orders').update(patch).eq('id', orderId);
     if (error) alert(error.message);
     else fetchOrders();
   };
@@ -305,22 +385,21 @@ export default function StaffDashboard() {
   if (authLoading) {
     return (
       <div className="mx-auto max-w-md py-16 text-center text-sm font-bold uppercase">
-        Checking staff session...
+        Verifying staff access...
       </div>
     );
   }
 
-  if (!session) {
+  if (!session || !isAuthorizedStaff) {
     return (
       <div className="mx-auto max-w-md px-4 py-16">
         <div className="border-2 border-black bg-white p-6">
           <p className="text-xs font-bold uppercase tracking-widest text-neutral-500">
-            Supabase Staff Auth
+            Restricted Access
           </p>
           <h1 className="mt-1 text-2xl font-black uppercase">Staff Portal Login</h1>
           <p className="mt-1 text-xs text-neutral-600">
-            Sign in with your Supabase staff account to manage inventory, categories, brands,
-            orders, and SEO.
+            Authorized staff only. Sign in with your registered staff email and password.
           </p>
 
           <form onSubmit={handleLogin} className="mt-5 space-y-3">
@@ -332,14 +411,24 @@ export default function StaffDashboard() {
               onChange={(e) => setEmail(e.target.value)}
               className="w-full border border-black p-2.5 text-sm outline-none"
             />
-            <input
-              type="password"
-              required
-              placeholder="Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full border border-black p-2.5 text-sm outline-none"
-            />
+            <div className="relative">
+    <input
+    type={showLoginPassword ? 'text' : 'password'}
+    required
+    placeholder="Password"
+    value={password}
+    onChange={(e) => setPassword(e.target.value)}
+    className="w-full border border-black p-2.5 pr-10 text-sm outline-none"
+  />
+  <button
+    type="button"
+    onClick={() => setShowLoginPassword((prev) => !prev)}
+    className="absolute top-1/2 right-2.5 -translate-y-1/2 text-black hover:opacity-70"
+    aria-label={showLoginPassword ? 'Hide password' : 'Show password'}
+  >
+    {showLoginPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+  </button>
+</div>
             {loginError && <p className="text-xs font-bold text-black">{loginError}</p>}
             <button
               type="submit"
@@ -416,7 +505,7 @@ export default function StaffDashboard() {
         </button>
       </div>
 
-      {/* TAB 1: INVENTORY & PROMOS */}
+      {/* TAB 1: INVENTORY, PROMOS & PROMO EMAIL BLAST */}
       {activeTab === 'inventory' && (
         <div className="space-y-8">
           <section className="border border-black p-6">
@@ -436,7 +525,6 @@ export default function StaffDashboard() {
                 className="border border-black p-2 text-sm outline-none"
               />
 
-              {/* Brand Selector */}
               <select
                 value={newProduct.brand}
                 onChange={(e) => setNewProduct({ ...newProduct, brand: e.target.value })}
@@ -450,7 +538,6 @@ export default function StaffDashboard() {
                 ))}
               </select>
 
-              {/* Main Department Selector */}
               <select
                 value={newProduct.category}
                 onChange={(e) => handleDepartmentChange(e.target.value)}
@@ -461,7 +548,6 @@ export default function StaffDashboard() {
                 <option value="accessories">Accessories</option>
               </select>
 
-              {/* Subcategory Selector */}
               <select
                 value={newProduct.subcategory}
                 onChange={(e) => setNewProduct({ ...newProduct, subcategory: e.target.value })}
@@ -587,58 +673,103 @@ export default function StaffDashboard() {
             </div>
           </section>
 
-          {/* Promo Codes */}
-          <section className="border border-black p-6">
-            <h2 className="flex items-center gap-2 text-lg font-black uppercase">
-              <Tag className="h-5 w-5" /> Create Promo / Special Code
-            </h2>
-            <form onSubmit={handleCreatePromo} className="mt-4 flex flex-wrap gap-3">
-              <input
-                required
-                placeholder="Code (e.g. TREND20)"
-                value={newPromo.code}
-                onChange={(e) => setNewPromo({ ...newPromo, code: e.target.value })}
-                className="border border-black p-2 text-sm uppercase outline-none"
-              />
-              <input
-                required
-                type="number"
-                min="1"
-                max="90"
-                placeholder="Discount %"
-                value={newPromo.discount_percent}
-                onChange={(e) => setNewPromo({ ...newPromo, discount_percent: e.target.value })}
-                className="w-32 border border-black p-2 text-sm outline-none"
-              />
-              <button
-                type="submit"
-                className="bg-black px-5 py-2 text-xs font-bold uppercase tracking-wider text-white hover:bg-neutral-800"
-              >
-                Create Promo
-              </button>
-            </form>
+          {/* Promo Codes & Send Promo Email to Account Holders */}
+          <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
+            <section className="border border-black p-6">
+              <h2 className="flex items-center gap-2 text-lg font-black uppercase">
+                <Tag className="h-5 w-5" /> Create Promo / Special Code
+              </h2>
+              <form onSubmit={handleCreatePromo} className="mt-4 flex flex-wrap gap-3">
+                <input
+                  required
+                  placeholder="Code (e.g. TREND20)"
+                  value={newPromo.code}
+                  onChange={(e) => setNewPromo({ ...newPromo, code: e.target.value })}
+                  className="border border-black p-2 text-sm uppercase outline-none"
+                />
+                <input
+                  required
+                  type="number"
+                  min="1"
+                  max="90"
+                  placeholder="Discount %"
+                  value={newPromo.discount_percent}
+                  onChange={(e) => setNewPromo({ ...newPromo, discount_percent: e.target.value })}
+                  className="w-32 border border-black p-2 text-sm outline-none"
+                />
+                <button
+                  type="submit"
+                  className="bg-black px-5 py-2 text-xs font-bold uppercase tracking-wider text-white hover:bg-neutral-800"
+                >
+                  Create Promo
+                </button>
+              </form>
 
-            <div className="mt-4 flex flex-wrap gap-2">
-              {promos.map((p) => (
-                <span key={p.id} className="border border-black px-3 py-1 text-xs font-bold uppercase">
-                  {p.code} — {p.discount_percent}% OFF
-                </span>
-              ))}
-            </div>
-          </section>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {promos.map((p) => (
+                  <span key={p.id} className="border border-black px-3 py-1 text-xs font-bold uppercase">
+                    {p.code} — {p.discount_percent}% OFF
+                  </span>
+                ))}
+              </div>
+            </section>
+
+            <section className="border border-black p-6">
+              <h2 className="flex items-center gap-2 text-lg font-black uppercase">
+                <Mail className="h-5 w-5" /> Email Promo to Account Holders
+              </h2>
+              <p className="mt-1 text-xs text-neutral-600">
+                Registered customer accounts: <strong>{customerEmails.length}</strong>
+              </p>
+
+              <form onSubmit={handleSendPromoEmailBlast} className="mt-4 space-y-3">
+                <select
+                  value={emailBlast.promoCode}
+                  onChange={(e) => setEmailBlast({ ...emailBlast, promoCode: e.target.value })}
+                  className="w-full border border-black bg-white p-2 text-xs font-bold uppercase outline-none"
+                >
+                  <option value="">Select Promo Code to Feature...</option>
+                  {promos.map((p) => (
+                    <option key={p.id} value={p.code}>
+                      {p.code} ({p.discount_percent}% OFF)
+                    </option>
+                  ))}
+                </select>
+
+                <input
+                  required
+                  placeholder="Email Subject"
+                  value={emailBlast.subject}
+                  onChange={(e) => setEmailBlast({ ...emailBlast, subject: e.target.value })}
+                  className="w-full border border-black p-2 text-sm outline-none"
+                />
+
+                <textarea
+                  required
+                  rows={3}
+                  placeholder="Promo message for customers..."
+                  value={emailBlast.message}
+                  onChange={(e) => setEmailBlast({ ...emailBlast, message: e.target.value })}
+                  className="w-full border border-black p-2 text-sm outline-none"
+                />
+
+                <button
+                  type="submit"
+                  className="w-full bg-black py-2.5 text-xs font-bold uppercase tracking-widest text-white hover:bg-neutral-800"
+                >
+                  Send Promo Email to All Account Holders (BCC)
+                </button>
+              </form>
+            </section>
+          </div>
         </div>
       )}
 
       {/* TAB 2: CATEGORIES & BRANDS MANAGER */}
       {activeTab === 'taxonomy' && (
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
-          {/* Subcategories Manager */}
           <section className="border border-black p-6">
             <h2 className="text-lg font-black uppercase">Manage Subcategories</h2>
-            <p className="mt-1 text-xs text-neutral-600">
-              Add or remove subcategories under Footwear, Clothes, or Accessories.
-            </p>
-
             <form onSubmit={handleAddCategory} className="mt-4 flex flex-wrap gap-2">
               <select
                 value={newCategory.department}
@@ -651,7 +782,7 @@ export default function StaffDashboard() {
               </select>
               <input
                 required
-                placeholder="Subcategory Name (e.g. Hoodies, Caps)"
+                placeholder="Subcategory Name"
                 value={newCategory.name}
                 onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })}
                 className="flex-1 border border-black p-2 text-sm outline-none"
@@ -681,7 +812,6 @@ export default function StaffDashboard() {
                             type="button"
                             onClick={() => handleDeleteCategory(cat.id)}
                             className="text-neutral-500 hover:text-black"
-                            aria-label={`Delete ${cat.name}`}
                           >
                             &times;
                           </button>
@@ -693,17 +823,12 @@ export default function StaffDashboard() {
             </div>
           </section>
 
-          {/* Brands Manager */}
           <section className="border border-black p-6">
             <h2 className="text-lg font-black uppercase">Manage Brands</h2>
-            <p className="mt-1 text-xs text-neutral-600">
-              Create brand names that staff can assign to items and customers can search or filter by.
-            </p>
-
             <form onSubmit={handleAddBrand} className="mt-4 flex gap-2">
               <input
                 required
-                placeholder="Brand Name (e.g. Nike, Jordan, G-Shock)"
+                placeholder="Brand Name"
                 value={newBrandName}
                 onChange={(e) => setNewBrandName(e.target.value)}
                 className="flex-1 border border-black p-2 text-sm outline-none"
@@ -727,7 +852,6 @@ export default function StaffDashboard() {
                     type="button"
                     onClick={() => handleDeleteBrand(b.id)}
                     className="text-neutral-500 hover:text-black"
-                    aria-label={`Delete ${b.name}`}
                   >
                     &times;
                   </button>
@@ -738,11 +862,11 @@ export default function StaffDashboard() {
         </div>
       )}
 
-      {/* TAB 3: ORDERS */}
+      {/* TAB 3: ORDERS + WAYBILL TRACKING */}
       {activeTab === 'orders' && (
         <section className="border border-black p-6">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-black uppercase">Customer Orders</h2>
+            <h2 className="text-lg font-black uppercase">Customer Orders &amp; Tracking</h2>
             <button
               type="button"
               onClick={fetchOrders}
@@ -776,7 +900,9 @@ export default function StaffDashboard() {
                         <span className="font-black">Total: R{Number(ord.total_amount).toFixed(2)}</span>
                         <select
                           value={ord.status || 'transferred_to_whatsapp'}
-                          onChange={(e) => handleOrderStatusChange(ord.id, e.target.value)}
+                          onChange={(e) =>
+                            handleUpdateOrder(ord.id, { status: e.target.value })
+                          }
                           className="border border-black bg-white px-2 py-1 text-xs font-bold uppercase"
                         >
                           <option value="transferred_to_whatsapp">Transferred to WhatsApp</option>
@@ -787,7 +913,7 @@ export default function StaffDashboard() {
                       </div>
                     </div>
 
-                    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
                         <p className="font-bold uppercase">Customer &amp; Address</p>
                         <p className="mt-0.5 text-neutral-700">
@@ -799,6 +925,26 @@ export default function StaffDashboard() {
                         <p className="mt-1 font-bold text-neutral-800">
                           Delivery: {ord.delivery_method}
                         </p>
+
+                        {/* Courier & Waybill Tracking Inputs */}
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <input
+                            placeholder="Courier (e.g. Pargo / Courier Guy)"
+                            defaultValue={ord.courier_name || ''}
+                            onBlur={(e) =>
+                              handleUpdateOrder(ord.id, { courier_name: e.target.value })
+                            }
+                            className="border border-black px-2 py-1 text-xs outline-none"
+                          />
+                          <input
+                            placeholder="Waybill / Tracking #"
+                            defaultValue={ord.tracking_number || ''}
+                            onBlur={(e) =>
+                              handleUpdateOrder(ord.id, { tracking_number: e.target.value })
+                            }
+                            className="border border-black px-2 py-1 text-xs outline-none"
+                          />
+                        </div>
                       </div>
 
                       <div>

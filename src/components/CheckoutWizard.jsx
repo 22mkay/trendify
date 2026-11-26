@@ -81,11 +81,23 @@ export default function CheckoutWizard({
             Number(item.price) * item.qty
           ).toFixed(2)}`
       ),
+  
       `------------------------------`,
       ...(discount > 0 ? [`*Promo Discount:* -R${discount.toFixed(2)}`] : []),
       `*Total Payable:* R${grandTotal.toFixed(2)}`,
-      ``,
-      `Please confirm availability and share payment details.`,
+      ...(settings?.account_number
+        ? [
+            `------------------------------`,
+            `*EFT Banking Details:*`,
+            `Bank: ${settings.bank_name}`,
+            `Account Holder: ${settings.account_holder}`,
+            `Account Number: ${settings.account_number}`,
+            `Branch Code: ${settings.branch_code}`,
+            `Reference: #${orderId.slice(0, 8).toUpperCase()}`,
+          ]
+        : []),
+            ``,
+      `Please confirm stock availability and I will send proof of payment.`,
     ];
 
     const phone = (settings?.whatsapp_number || '27000000000').replace(/\D/g, '');
@@ -104,6 +116,7 @@ export default function CheckoutWizard({
         .insert([
           {
             customer_name: address.fullName,
+            customer_email: user.email,
             customer_phone: address.phone,
             delivery_address: { ...address, email: user.email, user_id: user.id },
             delivery_method: delivery.label,
@@ -293,6 +306,26 @@ export default function CheckoutWizard({
                 <span>R{grandTotal.toFixed(2)}</span>
               </div>
             </div>
+            {settings?.account_number && (
+              <div className="border border-black bg-neutral-50 p-3 text-xs">
+                <p className="font-black uppercase tracking-wider">EFT Payment Details</p>
+                <div className="mt-1.5 grid grid-cols-2 gap-1 text-neutral-700">
+                  <span>Bank:</span>
+                  <span className="font-bold text-black">{settings.bank_name}</span>
+                  <span>Account Holder:</span>
+                  <span className="font-bold text-black">{settings.account_holder}</span>
+                  <span>Account Number:</span>
+                  <span className="font-bold text-black">{settings.account_number}</span>
+                  <span>Branch Code:</span>
+                  <span className="font-bold text-black">{settings.branch_code}</span>
+                  <span>Account Type:</span>
+                  <span className="font-bold text-black">{settings.account_type}</span>
+                </div>
+                <p className="mt-2 text-[11px] text-neutral-600">
+                  Use your Order ID as payment reference and send Proof of Payment on WhatsApp.
+                </p>
+              </div>
+            )}
 
             <button
               type="button"

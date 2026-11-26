@@ -1,8 +1,25 @@
 import React, { useState } from 'react';
-import { Search, Heart, ShoppingBag, Lock, ExternalLink, ChevronDown } from 'lucide-react';
+import {
+  Search,
+  Heart,
+  ShoppingBag,
+  UserPlus,
+  User,
+  Package,
+  ExternalLink,
+  ChevronDown,
+} from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 
-export default function Navbar({ onOpenCart, onOpenWishlist, onToggleStaff, isStaffView }) {
+export default function Navbar({
+  user,
+  onOpenCart,
+  onOpenWishlist,
+  onOpenCustomerAuth,
+  onOpenCustomerOrders,
+  onExitStaff,
+  isStaffView,
+}) {
   const {
     searchQuery,
     setSearchQuery,
@@ -20,7 +37,7 @@ export default function Navbar({ onOpenCart, onOpenWishlist, onToggleStaff, isSt
   const footwearSubcategories = categories.filter((c) => c.department === 'footwear');
 
   const handleNavClick = (dept, sub = 'all') => {
-    if (isStaffView) onToggleStaff();
+    if (isStaffView && onExitStaff) onExitStaff();
     selectDepartment(dept, sub);
     setFootwearDropdownOpen(false);
   };
@@ -65,14 +82,24 @@ export default function Navbar({ onOpenCart, onOpenWishlist, onToggleStaff, isSt
           </div>
         )}
 
+        {/* Right Header Icons: Wishlist, Cart, Customer Account / Track Orders */}
         <div className="order-2 flex items-center gap-2.5 md:order-3">
-          {!isStaffView && (
+          {isStaffView ? (
+            <button
+              type="button"
+              onClick={onExitStaff}
+              className="border border-black bg-black px-4 py-2 text-xs font-bold uppercase tracking-wider text-white hover:bg-neutral-800"
+            >
+              Back to Storefront
+            </button>
+          ) : (
             <>
               <button
                 type="button"
                 onClick={onOpenWishlist}
                 className="relative border border-black p-2 transition hover:bg-black hover:text-white"
                 aria-label="Wishlist"
+                title="Wishlist"
               >
                 <Heart className="h-5 w-5" />
                 {wishlist.length > 0 && (
@@ -90,23 +117,47 @@ export default function Navbar({ onOpenCart, onOpenWishlist, onToggleStaff, isSt
                 <ShoppingBag className="h-4 w-4" />
                 <span>Cart ({totalCartItems})</span>
               </button>
+
+              {user ? (
+                <button
+                  type="button"
+                  onClick={onOpenCustomerOrders}
+                  className="flex items-center gap-1.5 border border-black bg-white px-3 py-2 text-xs font-bold uppercase transition hover:bg-black hover:text-white"
+                  title="Track My Orders"
+                >
+                  <Package className="h-4 w-4" />
+                  <span className="hidden sm:inline">Track Orders</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onOpenCustomerAuth}
+                  className="flex items-center gap-1.5 border border-black bg-white px-3 py-2 text-xs font-bold uppercase transition hover:bg-black hover:text-white"
+                  aria-label="Create Account or Sign In"
+                  title="Create Account / Sign In"
+                >
+                  <UserPlus className="h-4 w-4" />
+                  <span className="hidden sm:inline">Account</span>
+                </button>
+              )}
+
+              {user && (
+                <button
+                  type="button"
+                  onClick={onOpenCustomerAuth}
+                  className="border border-black p-2 transition hover:bg-black hover:text-white"
+                  aria-label="Account Settings"
+                  title={user.email}
+                >
+                  <User className="h-5 w-5" />
+                </button>
+              )}
             </>
           )}
-
-          <button
-            type="button"
-            onClick={onToggleStaff}
-            className={`flex items-center gap-1.5 border border-black px-3 py-2 text-xs font-bold uppercase ${
-              isStaffView ? 'bg-black text-white' : 'bg-white text-black hover:bg-neutral-100'
-            }`}
-          >
-            <Lock className="h-3.5 w-3.5" />
-            <span>{isStaffView ? 'Back to Store' : 'Staff Login'}</span>
-          </button>
         </div>
       </div>
 
-      {/* Department Navigation Strip */}
+      {/* Department Navigation Strip (Slides & Open Shoes inside Footwear dropdown only) */}
       {!isStaffView && (
         <nav className="border-t border-neutral-200 bg-white px-4">
           <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-1 py-2 text-xs font-bold uppercase tracking-wider">
@@ -120,7 +171,7 @@ export default function Navbar({ onOpenCart, onOpenWishlist, onToggleStaff, isSt
               All Drops
             </button>
 
-            {/* Footwear with Dropdown listing Sneakers & Slides */}
+            {/* Footwear with Dropdown (Sneakers, Slides & Open Shoes, etc.) */}
             <div
               className="relative"
               onMouseEnter={() => setFootwearDropdownOpen(true)}
@@ -128,7 +179,7 @@ export default function Navbar({ onOpenCart, onOpenWishlist, onToggleStaff, isSt
             >
               <button
                 type="button"
-                onClick={() => handleNavClick('footwear', 'all')}
+                onClick={() => setFootwearDropdownOpen((prev) => !prev)}
                 className={`inline-flex items-center gap-1 px-3 py-1.5 transition ${
                   activeDepartment === 'footwear' ? 'bg-black text-white' : 'hover:bg-neutral-100'
                 }`}
@@ -159,15 +210,6 @@ export default function Navbar({ onOpenCart, onOpenWishlist, onToggleStaff, isSt
                 </div>
               )}
             </div>
-
-            {/* Direct Slides & Open Shoes shortcut tab */}
-            <button
-              type="button"
-              onClick={() => handleNavClick('footwear', 'Slides & Open Shoes')}
-              className="px-3 py-1.5 transition hover:bg-neutral-100"
-            >
-              Slides &amp; Open Shoes
-            </button>
 
             <button
               type="button"

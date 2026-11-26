@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { X } from 'lucide-react';
+import { X, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 
 export default function CustomerAuthModal({ isOpen, onClose, onAuthenticated }) {
   const [mode, setMode] = useState('login'); // 'login' | 'signup'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [infoMsg, setInfoMsg] = useState('');
@@ -31,7 +32,9 @@ export default function CustomerAuthModal({ isOpen, onClose, onAuthenticated }) 
           if (onAuthenticated) onAuthenticated(data.session);
           onClose();
         } else {
-          setInfoMsg('Account created! Check your email to confirm, or sign in if confirmation is disabled.');
+          setInfoMsg(
+            'Account created! Check your email to confirm, or sign in if confirmation is disabled.'
+          );
           setMode('login');
         }
       }
@@ -43,11 +46,11 @@ export default function CustomerAuthModal({ isOpen, onClose, onAuthenticated }) 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-      <div className="w-full max-w-md border-2 border-black bg-white p-6 text-black shadow-2xl">
-        <div className="mb-5 flex items-center justify-between border-b border-black pb-3">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-purple-950/80 p-4">
+      <div className="w-full max-w-md border-2 border-purple-700 bg-white p-6 text-purple-950 shadow-2xl">
+        <div className="mb-5 flex items-center justify-between border-b border-purple-200 pb-3">
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-purple-600">
               Account Required to Order
             </p>
             <h2 className="text-xl font-black uppercase">
@@ -57,7 +60,7 @@ export default function CustomerAuthModal({ isOpen, onClose, onAuthenticated }) 
           <button
             type="button"
             onClick={onClose}
-            className="border border-black p-1.5 hover:bg-black hover:text-white"
+            className="border border-purple-700 p-1.5 text-purple-700 hover:bg-purple-700 hover:text-white"
             aria-label="Close customer login"
           >
             <X className="h-4 w-4" />
@@ -72,8 +75,10 @@ export default function CustomerAuthModal({ isOpen, onClose, onAuthenticated }) 
               setErrorMsg('');
               setInfoMsg('');
             }}
-            className={`border border-black py-2 text-xs font-bold uppercase ${
-              mode === 'login' ? 'bg-black text-white' : 'bg-white text-black'
+            className={`border border-purple-700 py-2 text-xs font-bold uppercase ${
+              mode === 'login'
+                ? 'bg-purple-700 text-white'
+                : 'bg-white text-purple-700 hover:bg-purple-50'
             }`}
           >
             Sign In
@@ -85,8 +90,10 @@ export default function CustomerAuthModal({ isOpen, onClose, onAuthenticated }) 
               setErrorMsg('');
               setInfoMsg('');
             }}
-            className={`border border-black py-2 text-xs font-bold uppercase ${
-              mode === 'signup' ? 'bg-black text-white' : 'bg-white text-black'
+            className={`border border-purple-700 py-2 text-xs font-bold uppercase ${
+              mode === 'signup'
+                ? 'bg-purple-700 text-white'
+                : 'bg-white text-purple-700 hover:bg-purple-50'
             }`}
           >
             Sign Up
@@ -100,25 +107,37 @@ export default function CustomerAuthModal({ isOpen, onClose, onAuthenticated }) 
             placeholder="Customer Email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full border border-black p-2.5 text-sm outline-none focus:bg-neutral-100"
-          />
-          <input
-            type="password"
-            required
-            minLength={6}
-            placeholder="Password (min. 6 characters)"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full border border-black p-2.5 text-sm outline-none focus:bg-neutral-100"
+            className="w-full border border-purple-700 p-2.5 text-sm outline-none focus:bg-purple-50"
           />
 
-          {errorMsg && <p className="text-xs font-bold text-black">{errorMsg}</p>}
-          {infoMsg && <p className="text-xs font-bold text-neutral-700">{infoMsg}</p>}
+          <div className="relative">
+            <input
+              type={showPassword ? 'text' : 'password'}
+              required
+              minLength={6}
+              placeholder="Password (min. 6 characters)"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full border border-purple-700 p-2.5 pr-10 text-sm outline-none focus:bg-purple-50"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((prev) => !prev)}
+              className="absolute top-1/2 right-2.5 -translate-y-1/2 text-purple-700 hover:text-purple-950"
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              title={showPassword ? 'Hide password' : 'Show password'}
+            >
+              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
+
+          {errorMsg && <p className="text-xs font-bold text-purple-800">{errorMsg}</p>}
+          {infoMsg && <p className="text-xs font-bold text-purple-700">{infoMsg}</p>}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-black py-3 text-xs font-bold uppercase tracking-widest text-white hover:bg-neutral-800 disabled:opacity-50"
+            className="w-full bg-purple-700 py-3 text-xs font-bold uppercase tracking-widest text-white hover:bg-purple-800 disabled:opacity-50"
           >
             {loading
               ? 'Please wait...'

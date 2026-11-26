@@ -15,6 +15,11 @@ export function StoreProvider({ children }) {
     seo_description:
       'Shop black and white sneakers, slides, clothing, and accessories at Trendify.',
     seo_keywords: 'sneakers, slides, streetwear, caps, watches, Trendify',
+    bank_name: '',
+    account_holder: '',
+    account_number: '',
+    branch_code: '',
+    account_type: 'Personal Current / Cheque',
   });
 
   const [searchQuery, setSearchQuery] = useState('');
